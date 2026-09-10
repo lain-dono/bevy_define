@@ -20,7 +20,8 @@ pub use self::components::{
     def_has::HasDef,
     def_mut::{DefMut, DefWriteFetch},
     def_ref::{DefRef, DefRefFetch},
-    {DefComponent, DefineComponents, EntityInsertDef},
+    id_for::DefComponentIdFor,
+    {DefComponent, DefineComponents, EntityDef},
 };
 pub use self::resources::{
     DefRes, DefResMut, DefResource, DefineResources, get_resource, insert_resource,
@@ -78,7 +79,16 @@ impl<Marker: Define> DefineRegister<Marker> {
         })
     }
 
-    fn scope_resource<T: DefResource<Define = Marker>>(
+    fn entity_scope_component<T: DefComponent<Define = Marker>>(
+        entity: &mut EntityWorldMut,
+        key: Marker::Key,
+    ) -> ComponentId {
+        entity.resource_scope(|entity, mut def: Mut<Self>| unsafe {
+            def.component::<T>(entity.world_mut(), key)
+        })
+    }
+
+    fn world_scope_resource<T: DefResource<Define = Marker>>(
         world: &mut World,
         key: Marker::Key,
     ) -> ComponentId {

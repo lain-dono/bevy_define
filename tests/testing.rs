@@ -1,7 +1,7 @@
 #![expect(clippy::undocumented_unsafe_blocks)]
 
 use bevy_define::{
-    Def, DefComponent, DefKey, DefRes, DefResource, Define, DefineRegister, EntityInsertDef as _,
+    Def, DefComponent, DefKey, DefRes, DefResource, Define, DefineRegister, EntityDef as _,
     clone_def, get_resource, insert_resource,
 };
 use bevy_ecs::{component::Mutable, prelude::*, schedule::ScheduleLabel};

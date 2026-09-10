@@ -2,13 +2,14 @@ pub mod def;
 pub mod def_has;
 pub mod def_mut;
 pub mod def_ref;
+pub mod id_for;
 
 use super::{Define, DefineRegister};
 use bevy_ecs::component::{
     ComponentCloneBehavior, ComponentDescriptor, ComponentId, ComponentMutability, StorageType,
 };
 use bevy_ecs::system::{EntityCommand, EntityCommands};
-use bevy_ecs::world::{EntityWorldMut, Mut, World};
+use bevy_ecs::world::{EntityWorldMut, World};
 use bevy_ptr::OwningPtr;
 use std::borrow::Cow;
 use std::hash::Hash;
@@ -134,12 +135,13 @@ impl<C: DefComponent, T: Copy, S: Copy> Clone for StorageSwitch<C, T, S> {
 
 impl<C: DefComponent, T: Copy, S: Copy> Copy for StorageSwitch<C, T, S> {}
 
-pub trait EntityInsertDef {
+pub trait EntityDef {
     fn insert_def<T: DefComponent>(&mut self, key: <T::Define as Define>::Key, val: T)
     -> &mut Self;
+    fn remove_def<T: DefComponent>(&mut self, key: <T::Define as Define>::Key) -> &mut Self;
 }
 
-impl EntityInsertDef for EntityWorldMut<'_> {
+impl EntityDef for EntityWorldMut<'_> {
     fn insert_def<T: DefComponent>(
         &mut self,
         key: <T::Define as Define>::Key,
@@ -148,9 +150,14 @@ impl EntityInsertDef for EntityWorldMut<'_> {
         insert_component::<T>(self, key, val);
         self
     }
+
+    fn remove_def<T: DefComponent>(&mut self, key: <T::Define as Define>::Key) -> &mut Self {
+        remove_component::<T>(self, key);
+        self
+    }
 }
 
-impl EntityInsertDef for EntityCommands<'_> {
+impl EntityDef for EntityCommands<'_> {
     fn insert_def<T: DefComponent>(
         &mut self,
         key: <T::Define as Define>::Key,
@@ -158,10 +165,18 @@ impl EntityInsertDef for EntityCommands<'_> {
     ) -> &mut Self {
         self.queue(insert_def(key, val))
     }
+
+    fn remove_def<T: DefComponent>(&mut self, key: <T::Define as Define>::Key) -> &mut Self {
+        self.queue(remove_def::<T>(key))
+    }
 }
 
-fn insert_def<T: DefComponent>(key: <T::Define as Define>::Key, val: T) -> impl EntityCommand {
+pub fn insert_def<T: DefComponent>(key: <T::Define as Define>::Key, val: T) -> impl EntityCommand {
     move |mut entity: EntityWorldMut<'_>| insert_component::<T>(&mut entity, key, val)
+}
+
+pub fn remove_def<T: DefComponent>(key: <T::Define as Define>::Key) -> impl EntityCommand {
+    move |mut entity: EntityWorldMut<'_>| remove_component::<T>(&mut entity, key)
 }
 
 fn insert_component<T: DefComponent>(
@@ -170,9 +185,17 @@ fn insert_component<T: DefComponent>(
     val: T,
 ) {
     unsafe {
-        let id = entity.resource_scope(|entity, mut def: Mut<'_, DefineRegister<T::Define>>| {
-            def.component::<T>(entity.world_mut(), key)
-        });
+        let id = DefineRegister::entity_scope_component::<T>(entity, key);
         OwningPtr::make(val, |component| entity.insert_by_id(id, component));
+    }
+}
+
+fn remove_component<T: DefComponent>(
+    entity: &mut EntityWorldMut<'_>,
+    key: <T::Define as Define>::Key,
+) {
+    unsafe {
+        let id = DefineRegister::entity_scope_component::<T>(entity, key);
+        entity.remove_by_id(id);
     }
 }

@@ -80,7 +80,7 @@ pub fn insert_resource_with_caller<T: DefResource>(
     val: T,
     caller: MaybeLocation,
 ) {
-    let id = DefineRegister::scope_resource::<T>(world, key);
+    let id = DefineRegister::world_scope_resource::<T>(world, key);
     unsafe { OwningPtr::make(val, |value| world.insert_resource_by_id(id, value, caller)) };
 }
 
@@ -88,6 +88,6 @@ pub fn get_resource<T: DefResource>(
     world: &mut World,
     key: <T::Define as Define>::Key,
 ) -> Option<&T> {
-    let id = DefineRegister::scope_resource::<T>(world, key);
+    let id = DefineRegister::world_scope_resource::<T>(world, key);
     unsafe { world.get_resource_by_id(id).map(|res| res.deref::<T>()) }
 }
