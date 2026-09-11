@@ -137,7 +137,7 @@ unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> WorldQuery fo
 
     fn init_state(world: &mut World) -> ComponentId {
         DefineRegister::<T::Define>::arg_scope::<_, N>(world, |world, key, mut def| {
-            def.component::<T>(world, key.clone())
+            def.component::<T>(world, key.clone()).0
         })
     }
 

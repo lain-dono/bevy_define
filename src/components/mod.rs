@@ -11,16 +11,17 @@ use bevy_ecs::component::{
 use bevy_ecs::system::{EntityCommand, EntityCommands};
 use bevy_ecs::world::{EntityWorldMut, World};
 use bevy_ptr::OwningPtr;
+use std::any::TypeId;
 use std::borrow::Cow;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
 pub trait DefineComponents<Key: Send + Sync + Eq + Hash> {
-    fn register(world: &mut World, key: &Key) -> Box<[ComponentId]>;
+    fn register(world: &mut World, key: &Key) -> Box<[(ComponentId, TypeId)]>;
 }
 
 impl<Key: Send + Sync + Eq + Hash> DefineComponents<Key> for () {
-    fn register(_world: &mut World, _key: &Key) -> Box<[ComponentId]> {
+    fn register(_world: &mut World, _key: &Key) -> Box<[(ComponentId, TypeId)]> {
         vec![].into()
     }
 }
@@ -28,8 +29,8 @@ impl<Key: Send + Sync + Eq + Hash> DefineComponents<Key> for () {
 macro_rules! impl_define_components {
     ($($T:ident),*) => {
         impl<Def: Define, $($T: DefComponent<Define=Def>),*> DefineComponents<Def::Key> for ($($T,)*) {
-            fn register(world: &mut World, key: &Def::Key) -> Box<[ComponentId]> {
-                vec![ $(
+            fn register(world: &mut World, key: &Def::Key) -> Box<[(ComponentId, TypeId)]> {
+                vec![ $( (
                     // SAFETY: `T` is a rust type, so the layout will have `size()` as a multiple of `align()`
                     world.register_component_with_descriptor(unsafe {
                         ComponentDescriptor::new_with_layout(
@@ -41,9 +42,9 @@ macro_rules! impl_define_components {
                             $T::clone_behavior(),
                             None,
                         )
-                    })
-
-                ),* ].into()
+                    }),
+                    TypeId::of::<$T>(),
+                ) ),* ].into()
             }
         }
     };
@@ -194,8 +195,6 @@ fn remove_component<T: DefComponent>(
     entity: &mut EntityWorldMut<'_>,
     key: <T::Define as Define>::Key,
 ) {
-    unsafe {
-        let id = DefineRegister::entity_scope_component::<T>(entity, key);
-        entity.remove_by_id(id);
-    }
+    let id = DefineRegister::entity_scope_component::<T>(entity, key);
+    entity.remove_by_id(id);
 }

@@ -10,7 +10,7 @@ use bevy_ecs::{
 };
 use bevy_platform::collections::HashMap;
 use bevy_ptr::OwningPtr;
-use std::{hash::Hash, marker::PhantomData};
+use std::{any::TypeId, fmt, hash::Hash, marker::PhantomData};
 
 mod components;
 mod resources;
@@ -27,11 +27,12 @@ pub use self::resources::{
     DefRes, DefResMut, DefResource, DefineResources, get_resource, insert_resource,
 };
 
-type Slot = (Box<[ComponentId]>, Box<[ComponentId]>);
+type Slot = (Box<[(ComponentId, TypeId)]>, Box<[(ComponentId, TypeId)]>);
 
 #[derive(Resource)]
 pub struct DefineRegister<Marker: Define> {
     slots: HashMap<Marker::Key, Slot>,
+    index: HashMap<ComponentId, (Marker::Key, TypeId)>,
     marker: PhantomData<Marker>,
 }
 
@@ -39,34 +40,46 @@ impl<Marker: Define> Default for DefineRegister<Marker> {
     fn default() -> Self {
         Self {
             slots: HashMap::default(),
+            index: HashMap::default(),
             marker: PhantomData,
         }
     }
 }
 
 impl<Marker: Define> DefineRegister<Marker> {
-    pub fn component<T: DefComponent<Define = Marker>>(
-        &mut self,
-        world: &mut World,
-        key: Marker::Key,
-    ) -> ComponentId {
+    pub fn find(&self, id: ComponentId) -> Option<(DefKey<Marker::Key>, TypeId)> {
+        self.index
+            .get(&id)
+            .cloned()
+            .map(|(key, ty)| (DefKey(key), ty))
+    }
+
+    pub fn component<T>(&mut self, world: &mut World, key: Marker::Key) -> (ComponentId, TypeId)
+    where
+        T: DefComponent<Define = Marker>,
+    {
         self.get_or_init(world, key).0[T::INDEX]
     }
 
-    pub fn resource<T: DefResource<Define = Marker>>(
-        &mut self,
-        world: &mut World,
-        key: Marker::Key,
-    ) -> ComponentId {
+    pub fn resource<T>(&mut self, world: &mut World, key: Marker::Key) -> (ComponentId, TypeId)
+    where
+        T: DefResource<Define = Marker>,
+    {
         self.get_or_init(world, key).1[T::INDEX]
+    }
+
+    pub fn slot(&self, key: &Marker::Key) -> Option<&Slot> {
+        self.slots.get(key)
     }
 
     fn get_or_init(&mut self, world: &mut World, key: Marker::Key) -> &mut Slot {
         self.slots.entry(key).or_insert_with_key(|key| {
-            (
-                Marker::Components::register(world, key),
-                Marker::Resources::register(world, key),
-            )
+            let components = Marker::Components::register(world, key);
+            let resources = Marker::Resources::register(world, key);
+            for &(id, type_id) in components.iter().chain(resources.iter()) {
+                self.index.insert(id, (key.clone(), type_id));
+            }
+            (components, resources)
         })
     }
 
@@ -84,7 +97,7 @@ impl<Marker: Define> DefineRegister<Marker> {
         key: Marker::Key,
     ) -> ComponentId {
         entity.resource_scope(|entity, mut def: Mut<Self>| unsafe {
-            def.component::<T>(entity.world_mut(), key)
+            def.component::<T>(entity.world_mut(), key).0
         })
     }
 
@@ -92,12 +105,20 @@ impl<Marker: Define> DefineRegister<Marker> {
         world: &mut World,
         key: Marker::Key,
     ) -> ComponentId {
-        world.resource_scope(|world, mut def: Mut<Self>| unsafe { def.resource::<T>(world, key) })
+        world.resource_scope(|world, mut def: Mut<Self>| unsafe { def.resource::<T>(world, key).0 })
     }
 }
 
 #[derive(Resource)]
 pub struct DefKey<Key: Clone + Send + Sync + Eq + Hash, const N: usize = 0>(pub Key);
+
+impl<Key: fmt::Debug + Clone + Send + Sync + Eq + Hash, const N: usize> fmt::Debug
+    for DefKey<Key, N>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("DefKey").field(&self.0).finish()
+    }
+}
 
 impl<Key: Clone + Send + Sync + Eq + Hash, const N: usize> Clone for DefKey<Key, N> {
     fn clone(&self) -> Self {
@@ -143,21 +164,19 @@ unsafe fn drop_fn_for<T: 'static>() -> Option<for<'a> unsafe fn(OwningPtr<'a>)> 
 
 pub fn clone_def<T: Clone>() -> ComponentCloneBehavior {
     ComponentCloneBehavior::Custom(
-        |source: &SourceComponent<'_>, ctx: &mut ComponentCloneCtx<'_, '_>| {
-            // Safety: no
-            unsafe {
-                let val = source.ptr().deref::<T>().clone();
-                OwningPtr::make(val, |ptr| ctx.write_target_component_ptr(ptr.as_ref()));
-            }
+        // Safety: no
+        |source: &SourceComponent<'_>, ctx: &mut ComponentCloneCtx<'_, '_>| unsafe {
+            let val = source.ptr().deref::<T>().clone();
+            OwningPtr::make(val, |ptr| ctx.write_target_component_ptr(ptr.as_ref()));
         },
     )
 }
 
 pub fn copy_def<T: Copy>() -> ComponentCloneBehavior {
     ComponentCloneBehavior::Custom(
-        |source: &SourceComponent<'_>, ctx: &mut ComponentCloneCtx<'_, '_>| {
-            // Safety: no
-            unsafe { ctx.write_target_component_ptr(source.ptr()) };
+        // Safety: no
+        |source: &SourceComponent<'_>, ctx: &mut ComponentCloneCtx<'_, '_>| unsafe {
+            ctx.write_target_component_ptr(source.ptr())
         },
     )
 }

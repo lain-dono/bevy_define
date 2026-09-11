@@ -8,8 +8,7 @@ use bevy_ecs::component::{
 };
 use bevy_ecs::world::World;
 use bevy_ptr::OwningPtr;
-use std::borrow::Cow;
-use std::hash::Hash;
+use std::{any::TypeId, borrow::Cow, hash::Hash};
 
 pub use self::res::DefRes;
 pub use self::res_mut::DefResMut;
@@ -36,11 +35,11 @@ pub unsafe trait DefResource: Send + Sync + 'static {
 }
 
 pub trait DefineResources<Key: Send + Sync + Eq + Hash> {
-    fn register(world: &mut World, key: &Key) -> Box<[ComponentId]>;
+    fn register(world: &mut World, key: &Key) -> Box<[(ComponentId, TypeId)]>;
 }
 
 impl<Key: Send + Sync + Eq + Hash> DefineResources<Key> for () {
-    fn register(_world: &mut World, _key: &Key) -> Box<[ComponentId]> {
+    fn register(_world: &mut World, _key: &Key) -> Box<[(ComponentId, TypeId)]> {
         vec![].into()
     }
 }
@@ -48,8 +47,9 @@ impl<Key: Send + Sync + Eq + Hash> DefineResources<Key> for () {
 macro_rules! impl_define_resources {
     ($($T:ident),*) => {
         impl<Def: Define, $($T: DefResource<Define=Def>),*> DefineResources<Def::Key> for ($($T,)*) {
-            fn register(world: &mut World, key: &Def::Key) -> Box<[ComponentId]> {
-                vec![ $(
+            fn register(world: &mut World, key: &Def::Key) -> Box<[(ComponentId, TypeId)]> {
+                vec![ $( (
+                    // SAFETY: `T` is a rust type, so the layout will have `size()` as a multiple of `align()`
                     world.register_component_with_descriptor(unsafe {
                         ComponentDescriptor::new_with_layout(
                             $T::name(key),
@@ -60,8 +60,9 @@ macro_rules! impl_define_resources {
                             $T::clone_behavior(),
                             None,
                         )
-                    })
-                ),* ].into()
+                    }),
+                    TypeId::of::<$T>(),
+                ) ),* ].into()
             }
         }
     };

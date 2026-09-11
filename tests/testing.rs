@@ -167,11 +167,11 @@ fn clone() {
     let ([health, stamina], entity, mut world) = init();
 
     world.resource_scope(|world, mut def: Mut<'_, DefineRegister<Variables>>| {
-        let a_health = def.component::<A>(world, health.key());
-        let a_stamina = def.component::<A>(world, stamina.key());
+        let a_health = def.component::<A>(world, health.key()).0;
+        let a_stamina = def.component::<A>(world, stamina.key()).0;
 
-        let b_health = def.component::<B>(world, health.key());
-        let b_stamina = def.component::<B>(world, stamina.key());
+        let b_health = def.component::<B>(world, health.key()).0;
+        let b_stamina = def.component::<B>(world, stamina.key()).0;
 
         let entity_clone = world.spawn_empty().id();
 

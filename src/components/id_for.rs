@@ -4,7 +4,7 @@ use bevy_ecs::{
     system::{Local, SystemParam},
     world::{FromWorld, World},
 };
-use std::{marker::PhantomData, ops::Deref};
+use std::{any::TypeId, marker::PhantomData, ops::Deref};
 
 /// A [`SystemParam`] that provides access to the [`ComponentId`] for a specific component type.
 ///
@@ -30,10 +30,14 @@ impl<T: DefComponent, const N: usize> DefComponentIdFor<'_, T, N> {
         **self
     }
 
-    /// Gets the [`ComponentId`] for the type `T`.
     #[inline]
     pub fn key(&self) -> &<T::Define as Define>::Key {
         &self.0.key
+    }
+
+    #[inline]
+    pub fn type_id(&self) -> TypeId {
+        self.0.type_id
     }
 }
 
@@ -55,12 +59,13 @@ impl<T: DefComponent, const N: usize> From<DefComponentIdFor<'_, T, N>> for Comp
 struct InitComponentId<T: DefComponent, const N: usize> {
     key: <T::Define as Define>::Key,
     component_id: ComponentId,
+    type_id: TypeId,
     marker: PhantomData<T>,
 }
 
 impl<T: DefComponent, const N: usize> FromWorld for InitComponentId<T, N> {
     fn from_world(world: &mut World) -> Self {
-        let (key, component_id) =
+        let (key, (component_id, type_id)) =
             DefineRegister::<T::Define>::arg_scope::<_, N>(world, |world, key, mut def| {
                 (key.clone(), def.component::<T>(world, key.clone()))
             });
@@ -68,6 +73,7 @@ impl<T: DefComponent, const N: usize> FromWorld for InitComponentId<T, N> {
         Self {
             key,
             component_id,
+            type_id,
             marker: PhantomData,
         }
     }
