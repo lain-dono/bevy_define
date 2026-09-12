@@ -1,27 +1,24 @@
-use super::{DefComponent, Define, DefineRegister};
+use super::{DefComponent, DefineRegister, Key};
 use bevy_ecs::{
-    component::{ComponentId, ComponentMutability as _},
-    prelude::*,
-    reflect::from_reflect_with_fallback,
+    component::ComponentMutability as _, prelude::*, reflect::from_reflect_with_fallback,
     world::unsafe_world_cell::UnsafeEntityCell,
 };
 use bevy_ptr::OwningPtr;
 use bevy_reflect::{FromType, PartialReflect, Reflect, TypePath, TypeRegistry};
 use bevy_utils::DebugName;
 
-pub struct ReflectDef<Marker: Define> {
-    pub insert:
-        for<'w> fn(Marker::Key, &mut EntityWorldMut<'w>, &dyn PartialReflect, &TypeRegistry),
-    pub apply: for<'w> fn(Marker::Key, EntityMut<'w>, &dyn PartialReflect),
-    pub remove: for<'w> fn(Marker::Key, &mut EntityWorldMut<'w>),
-    pub reflect:
-        for<'w> unsafe fn(Marker::Key, UnsafeEntityCell<'w>) -> Option<Mut<'w, dyn Reflect>>,
+#[derive(Clone)]
+pub struct ReflectDef {
+    pub insert: for<'w> fn(Key, &mut EntityWorldMut<'w>, &dyn PartialReflect, &TypeRegistry),
+    pub apply: for<'w> fn(Key, EntityMut<'w>, &dyn PartialReflect),
+    pub remove: for<'w> fn(Key, &mut EntityWorldMut<'w>),
+    pub reflect: for<'w> unsafe fn(Key, UnsafeEntityCell<'w>) -> Option<Mut<'w, dyn Reflect>>,
 }
 
-impl<Marker: Define> ReflectDef<Marker> {
+impl ReflectDef {
     pub fn insert(
         &self,
-        key: Marker::Key,
+        key: Key,
         entity: &mut EntityWorldMut<'_>,
         component: &dyn PartialReflect,
         registry: &TypeRegistry,
@@ -29,30 +26,24 @@ impl<Marker: Define> ReflectDef<Marker> {
         (self.insert)(key, entity, component, registry);
     }
 
-    pub fn apply(&self, key: Marker::Key, entity: EntityMut<'_>, component: &dyn PartialReflect) {
+    pub fn apply(&self, key: Key, entity: EntityMut<'_>, component: &dyn PartialReflect) {
         (self.apply)(key, entity, component);
     }
 
-    pub fn remove(&self, key: Marker::Key, entity: &mut EntityWorldMut<'_>) {
+    pub fn remove(&self, key: Key, entity: &mut EntityWorldMut<'_>) {
         (self.remove)(key, entity);
     }
 
     pub unsafe fn reflect<'w>(
         &self,
-        key: Marker::Key,
+        key: Key,
         entity: UnsafeEntityCell<'w>,
     ) -> Option<Mut<'w, dyn Reflect>> {
         unsafe { (self.reflect)(key, entity) }
     }
 }
 
-impl<Marker: Define> Clone for ReflectDef<Marker> {
-    fn clone(&self) -> Self {
-        Self { ..*self }
-    }
-}
-
-impl<T: DefComponent + Reflect + TypePath> FromType<T> for ReflectDef<T::Define> {
+impl<T: DefComponent + Reflect + TypePath> FromType<T> for ReflectDef {
     fn from_type() -> Self {
         Self {
             insert: |key, entity, component, registry| unsafe {

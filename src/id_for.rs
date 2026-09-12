@@ -1,4 +1,4 @@
-use super::{DefComponent, DefKey, Define, DefineRegister};
+use super::{DefComponent, DefKey, DefineRegister, Key};
 use bevy_ecs::{
     component::ComponentId,
     system::{Local, SystemParam},
@@ -31,7 +31,7 @@ impl<T: DefComponent, const N: usize> DefComponentIdFor<'_, T, N> {
     }
 
     #[inline]
-    pub fn key(&self) -> &<T::Define as Define>::Key {
+    pub fn key(&self) -> &Key {
         &self.0.key
     }
 
@@ -57,7 +57,7 @@ impl<T: DefComponent, const N: usize> From<DefComponentIdFor<'_, T, N>> for Comp
 
 /// Initializes the [`ComponentId`] for a specific type when used with [`FromWorld`].
 struct InitComponentId<T: DefComponent, const N: usize> {
-    key: <T::Define as Define>::Key,
+    key: Key,
     component_id: ComponentId,
     type_id: TypeId,
     marker: PhantomData<T>,
@@ -65,13 +65,12 @@ struct InitComponentId<T: DefComponent, const N: usize> {
 
 impl<T: DefComponent, const N: usize> FromWorld for InitComponentId<T, N> {
     fn from_world(world: &mut World) -> Self {
-        let (key, (component_id, type_id)) = world.resource_scope(
-            |world, key: Mut<'_, DefKey<<T::Define as Define>::Key, N>>| {
-                world.resource_scope(|world, mut def: Mut<'_, DefineRegister<T::Define>>| {
+        let (key, (component_id, type_id)) =
+            world.resource_scope(|world, key: Mut<'_, DefKey<N>>| {
+                world.resource_scope(|world, mut def: Mut<'_, DefineRegister>| {
                     (key.0.clone(), def.component::<T>(world, key.0.clone()))
                 })
-            },
-        );
+            });
 
         Self {
             key,

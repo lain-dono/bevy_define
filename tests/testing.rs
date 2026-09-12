@@ -1,31 +1,19 @@
 #![expect(clippy::undocumented_unsafe_blocks)]
 
-use bevy_define::{
-    Def, DefComponent, DefKey, DefRes, DefResource, Define, DefineRegister, EntityDef as _,
-    clone_def, get_resource, insert_resource,
-};
+use std::str::FromStr;
+
+use bevy_define::{Def, DefComponent, DefKey, DefineRegister, EntityDef as _, clone_def};
 use bevy_ecs::{component::Mutable, prelude::*, schedule::ScheduleLabel};
 
 // Declare a new schedule label.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash, Default)]
 struct Update;
 
-type Key = std::borrow::Cow<'static, str>;
-
-pub enum Variables {}
-impl Define for Variables {
-    type Key = Key;
-    type Components = (A, B);
-    type Resources = (VarRes,);
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct A(usize);
 
 unsafe impl DefComponent for A {
-    type Define = Variables;
     type Mutability = Mutable;
-    const INDEX: usize = 0;
 
     fn clone_behavior() -> bevy_ecs::component::ComponentCloneBehavior {
         clone_def::<Self>()
@@ -36,26 +24,16 @@ unsafe impl DefComponent for A {
 pub struct B(usize);
 
 unsafe impl DefComponent for B {
-    type Define = Variables;
     type Mutability = Mutable;
-    const INDEX: usize = 1;
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct VarRes(usize);
-unsafe impl DefResource for VarRes {
-    type Define = Variables;
-    type Mutability = Mutable;
-    const INDEX: usize = 0;
-}
-
-fn init() -> ([DefKey<Key>; 2], Entity, World) {
+fn init() -> ([DefKey; 2], Entity, World) {
     let mut world = World::new();
 
-    world.init_resource::<DefineRegister<Variables>>();
+    world.init_resource::<DefineRegister>();
 
     let params = ["health", "stamina"];
-    let [health, stamina]: [DefKey<Key>; _] = params.map(|key| DefKey(key.into()));
+    let [health, stamina]: [DefKey; _] = params.map(|key| DefKey::from_str(key).unwrap());
 
     let entity = world.spawn_empty().id();
     world
@@ -107,23 +85,6 @@ fn query() {
 }
 
 #[test]
-fn resource() {
-    let ([health, stamina], _entity, mut world) = init();
-
-    insert_resource(&mut world, health.key(), VarRes(42));
-    world.flush();
-
-    let health_res = get_resource::<VarRes>(&mut world, health.key());
-    assert_eq!(health_res, Some(&VarRes(42)));
-
-    insert_resource(&mut world, stamina.key(), VarRes(34));
-    world.flush();
-
-    let stamina_res = get_resource::<VarRes>(&mut world, stamina.key());
-    assert_eq!(stamina_res, Some(&VarRes(34)));
-}
-
-#[test]
 fn schedule_manual() {
     let ([health, stamina], _entity, mut world) = init();
 
@@ -166,7 +127,7 @@ fn schedule_resource() {
 fn clone() {
     let ([health, stamina], entity, mut world) = init();
 
-    world.resource_scope(|world, mut def: Mut<'_, DefineRegister<Variables>>| {
+    world.resource_scope(|world, mut def: Mut<'_, DefineRegister>| {
         let (a_health, _) = def.component::<A>(world, health.key());
         let (a_stamina, _) = def.component::<A>(world, stamina.key());
 
