@@ -3,6 +3,7 @@ pub mod def_has;
 pub mod def_mut;
 pub mod def_ref;
 pub mod id_for;
+pub mod reflect;
 
 use super::{Define, DefineRegister};
 use bevy_ecs::component::{

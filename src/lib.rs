@@ -8,7 +8,7 @@ use bevy_ecs::{
     entity::{ComponentCloneCtx, SourceComponent},
     prelude::*,
 };
-use bevy_platform::collections::HashMap;
+use bevy_platform::collections::{HashMap, hash_map::Keys};
 use bevy_ptr::OwningPtr;
 use std::{any::TypeId, fmt, hash::Hash, marker::PhantomData};
 
@@ -21,6 +21,7 @@ pub use self::components::{
     def_mut::{DefMut, DefWriteFetch},
     def_ref::{DefRef, DefRefFetch},
     id_for::DefComponentIdFor,
+    reflect::ReflectDef,
     {DefComponent, DefineComponents, EntityDef},
 };
 pub use self::resources::{
@@ -48,10 +49,11 @@ impl<Marker: Define> Default for DefineRegister<Marker> {
 
 impl<Marker: Define> DefineRegister<Marker> {
     pub fn find(&self, id: ComponentId) -> Option<(DefKey<Marker::Key>, TypeId)> {
-        self.index
-            .get(&id)
-            .cloned()
-            .map(|(key, ty)| (DefKey(key), ty))
+        self.index.get(&id).map(|(k, id)| (DefKey(k.clone()), *id))
+    }
+
+    pub fn keys(&self) -> Keys<'_, Marker::Key, Slot> {
+        self.slots.keys()
     }
 
     pub fn component<T>(&mut self, world: &mut World, key: Marker::Key) -> (ComponentId, TypeId)
@@ -97,7 +99,7 @@ impl<Marker: Define> DefineRegister<Marker> {
         key: Marker::Key,
     ) -> ComponentId {
         entity.resource_scope(|entity, mut def: Mut<Self>| unsafe {
-            def.component::<T>(entity.world_mut(), key).0
+            entity.world_scope(|world| def.component::<T>(world, key).0)
         })
     }
 
@@ -117,6 +119,14 @@ impl<Key: fmt::Debug + Clone + Send + Sync + Eq + Hash, const N: usize> fmt::Deb
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("DefKey").field(&self.0).finish()
+    }
+}
+
+impl<Key: fmt::Display + Clone + Send + Sync + Eq + Hash, const N: usize> fmt::Display
+    for DefKey<Key, N>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
