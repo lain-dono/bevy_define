@@ -10,7 +10,6 @@ bevy_ptr = "0.19"
 bevy_platform = "0.19"
 bevy_utils = "0.19"
 bevy_reflect = "0.19"
-variadics_please = { version = "1.1.0" }
 
 #[lints]
 #workspace = true
