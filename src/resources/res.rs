@@ -186,9 +186,7 @@ unsafe impl<T: DefResource, const N: usize> SystemParam for DefRes<'_, T, N> {
     type Item<'w, 's> = DefRes<'w, T, N>;
 
     fn init_state(world: &mut World) -> Self::State {
-        DefineRegister::<T::Define>::arg_scope::<_, N>(world, |world, key, mut def| {
-            def.resource::<T>(world, key.clone()).0
-        })
+        DefineRegister::arg_resouce::<T, N>(world).0
     }
 
     fn init_access(

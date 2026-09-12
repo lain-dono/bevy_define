@@ -5,7 +5,7 @@ pub mod def_ref;
 pub mod id_for;
 pub mod reflect;
 
-use super::{Define, DefineRegister};
+use super::{DefKey, Define, DefineRegister};
 use bevy_ecs::component::{
     ComponentCloneBehavior, ComponentDescriptor, ComponentId, ComponentMutability, StorageType,
 };
@@ -186,16 +186,14 @@ fn insert_component<T: DefComponent>(
     key: <T::Define as Define>::Key,
     val: T,
 ) {
-    unsafe {
-        let id = DefineRegister::entity_scope_component::<T>(entity, key);
-        OwningPtr::make(val, |component| entity.insert_by_id(id, component));
-    }
+    let (id, _) = DefineRegister::entity_component::<T>(entity, key);
+    unsafe { OwningPtr::make(val, |component| entity.insert_by_id(id, component)) };
 }
 
 fn remove_component<T: DefComponent>(
     entity: &mut EntityWorldMut<'_>,
     key: <T::Define as Define>::Key,
 ) {
-    let id = DefineRegister::entity_scope_component::<T>(entity, key);
+    let (id, _) = DefineRegister::entity_component::<T>(entity, key);
     entity.remove_by_id(id);
 }

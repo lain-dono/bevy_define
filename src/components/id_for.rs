@@ -1,8 +1,8 @@
-use super::{DefComponent, Define, DefineRegister};
+use super::{DefComponent, DefKey, Define, DefineRegister};
 use bevy_ecs::{
     component::ComponentId,
     system::{Local, SystemParam},
-    world::{FromWorld, World},
+    world::{FromWorld, Mut, World},
 };
 use std::{any::TypeId, marker::PhantomData, ops::Deref};
 
@@ -65,10 +65,13 @@ struct InitComponentId<T: DefComponent, const N: usize> {
 
 impl<T: DefComponent, const N: usize> FromWorld for InitComponentId<T, N> {
     fn from_world(world: &mut World) -> Self {
-        let (key, (component_id, type_id)) =
-            DefineRegister::<T::Define>::arg_scope::<_, N>(world, |world, key, mut def| {
-                (key.clone(), def.component::<T>(world, key.clone()))
-            });
+        let (key, (component_id, type_id)) = world.resource_scope(
+            |world, key: Mut<'_, DefKey<<T::Define as Define>::Key, N>>| {
+                world.resource_scope(|world, mut def: Mut<'_, DefineRegister<T::Define>>| {
+                    (key.0.clone(), def.component::<T>(world, key.0.clone()))
+                })
+            },
+        );
 
         Self {
             key,

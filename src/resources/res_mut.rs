@@ -321,9 +321,7 @@ unsafe impl<'a, T: DefResource<Mutability = Mutable>, const N: usize> SystemPara
     type Item<'w, 's> = DefResMut<'w, T, N>;
 
     fn init_state(world: &mut World) -> Self::State {
-        DefineRegister::<T::Define>::arg_scope::<_, N>(world, |world, key, mut def| {
-            def.resource::<T>(world, key.clone()).0
-        })
+        DefineRegister::arg_resouce::<T, N>(world).0
     }
 
     fn init_access(

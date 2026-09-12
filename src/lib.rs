@@ -7,6 +7,7 @@ use bevy_ecs::{
     component::{ComponentCloneBehavior, ComponentId},
     entity::{ComponentCloneCtx, SourceComponent},
     prelude::*,
+    world::unsafe_world_cell::{UnsafeEntityCell, UnsafeWorldCell},
 };
 use bevy_platform::collections::{HashMap, hash_map::Keys};
 use bevy_ptr::OwningPtr;
@@ -28,6 +29,7 @@ pub use self::resources::{
     DefRes, DefResMut, DefResource, DefineResources, get_resource, insert_resource,
 };
 
+type Key = Box<[u8]>;
 type Slot = (Box<[(ComponentId, TypeId)]>, Box<[(ComponentId, TypeId)]>);
 
 #[derive(Resource)]
@@ -60,22 +62,23 @@ impl<Marker: Define> DefineRegister<Marker> {
     where
         T: DefComponent<Define = Marker>,
     {
-        self.get_or_init(world, key).0[T::INDEX]
+        self.get_or_init(world.as_unsafe_world_cell(), key).0[T::INDEX]
     }
 
     pub fn resource<T>(&mut self, world: &mut World, key: Marker::Key) -> (ComponentId, TypeId)
     where
         T: DefResource<Define = Marker>,
     {
-        self.get_or_init(world, key).1[T::INDEX]
+        self.get_or_init(world.as_unsafe_world_cell(), key).1[T::INDEX]
     }
 
     pub fn slot(&self, key: &Marker::Key) -> Option<&Slot> {
         self.slots.get(key)
     }
 
-    fn get_or_init(&mut self, world: &mut World, key: Marker::Key) -> &mut Slot {
+    fn get_or_init(&mut self, world: UnsafeWorldCell<'_>, key: Marker::Key) -> &mut Slot {
         self.slots.entry(key).or_insert_with_key(|key| {
+            let world = unsafe { world.world_mut() };
             let components = Marker::Components::register(world, key);
             let resources = Marker::Resources::register(world, key);
             for &(id, type_id) in components.iter().chain(resources.iter()) {
@@ -94,13 +97,37 @@ impl<Marker: Define> DefineRegister<Marker> {
         })
     }
 
-    fn entity_scope_component<T: DefComponent<Define = Marker>>(
+    fn arg_component<T: DefComponent<Define = Marker>, const N: usize>(
+        world: &mut World,
+    ) -> (ComponentId, TypeId) {
+        Self::arg_scope::<_, N>(world, |world, key, mut def| {
+            def.component::<T>(world, key.clone())
+        })
+    }
+
+    fn arg_resouce<T: DefResource<Define = Marker>, const N: usize>(
+        world: &mut World,
+    ) -> (ComponentId, TypeId) {
+        Self::arg_scope::<_, N>(world, |world, key, mut def| {
+            def.resource::<T>(world, key.clone())
+        })
+    }
+
+    fn entity_component<T: DefComponent<Define = Marker>>(
         entity: &mut EntityWorldMut,
         key: Marker::Key,
-    ) -> ComponentId {
+    ) -> (ComponentId, TypeId) {
         entity.resource_scope(|entity, mut def: Mut<Self>| unsafe {
-            entity.world_scope(|world| def.component::<T>(world, key).0)
+            entity.world_scope(|world| def.component::<T>(world, key))
         })
+    }
+
+    unsafe fn cell_component<T: DefComponent<Define = Marker>>(
+        cell: UnsafeEntityCell<'_>,
+        key: <T::Define as Define>::Key,
+    ) -> Option<(ComponentId, TypeId)> {
+        let mut def = unsafe { cell.world().get_resource_mut::<Self>()? };
+        Some(def.get_or_init(cell.world(), key).0[T::INDEX])
     }
 
     fn world_scope_resource<T: DefResource<Define = Marker>>(

@@ -56,10 +56,7 @@ impl<T: DefComponent + Reflect + TypePath> FromType<T> for ReflectDef<T::Define>
     fn from_type() -> Self {
         Self {
             insert: |key, entity, component, registry| unsafe {
-                let id =
-                    entity.resource_scope(|entity, mut def: Mut<DefineRegister<T::Define>>| {
-                        entity.world_scope(|world| def.component::<T>(world, key).0)
-                    });
+                let (id, _) = DefineRegister::entity_component::<T>(entity, key);
 
                 let component = entity.world_scope(|world| {
                     from_reflect_with_fallback::<T>(component, world, registry)
@@ -81,7 +78,7 @@ impl<T: DefComponent + Reflect + TypePath> FromType<T> for ReflectDef<T::Define>
 
                 let cell = entity.as_unsafe_entity_cell();
 
-                let Some(component_id) = get_id::<T>(key, cell) else {
+                let Some((component_id, _)) = DefineRegister::cell_component::<T>(cell, key) else {
                     return;
                 };
                 let Ok(ptr) = cell.get_mut_by_id(component_id) else {
@@ -91,25 +88,19 @@ impl<T: DefComponent + Reflect + TypePath> FromType<T> for ReflectDef<T::Define>
                 component.apply(reflected_component);
             },
             remove: |key, entity| unsafe {
-                let component_id = get_id::<T>(key, entity.as_mutable().as_unsafe_entity_cell());
-                if let Some(component_id) = component_id {
+                let component_id = DefineRegister::cell_component::<T>(
+                    entity.as_mutable().as_unsafe_entity_cell(),
+                    key,
+                );
+                if let Some((component_id, _)) = component_id {
                     entity.remove_by_id(component_id);
                 }
             },
             reflect: |key, cell| unsafe {
-                let component_id = get_id::<T>(key, cell)?;
+                let (component_id, _) = DefineRegister::cell_component::<T>(cell, key)?;
                 let ptr = cell.get_mut_by_id(component_id).ok()?;
                 Some(ptr.map_unchanged(|ptr| ptr.deref_mut::<T>().as_reflect_mut()))
             },
         }
     }
-}
-
-unsafe fn get_id<T: DefComponent>(
-    key: <T::Define as Define>::Key,
-    cell: UnsafeEntityCell<'_>,
-) -> Option<ComponentId> {
-    let def = unsafe { cell.world().get_resource::<DefineRegister<T::Define>>()? };
-    let (components, _resources) = def.slot(&key)?;
-    Some(components[T::INDEX].0)
 }
