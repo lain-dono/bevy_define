@@ -1,7 +1,10 @@
-use super::{DefComponent, DefineRegister, StorageSwitch, def::Def};
+use super::{
+    Def, DefComponent, DefineRegister,
+    fetch::{DefWriteFetch, StorageSwitch},
+};
 use bevy_ecs::{
     archetype::Archetype,
-    change_detection::{ContiguousMut, MaybeLocation, Tick},
+    change_detection::{ContiguousMut, Tick},
     component::{ComponentId, Components, Mutable, StorageType},
     entity::Entity,
     query::{
@@ -9,48 +12,19 @@ use bevy_ecs::{
         EcsAccessType, FilteredAccess, IterQueryData, QueryData, ReleaseStateQueryData,
         SingleEntityQueryData, WorldQuery,
     },
-    storage::{ComponentSparseSet, Table, TableRow},
+    storage::{Table, TableRow},
     world::{Mut, World, unsafe_world_cell::UnsafeWorldCell},
 };
-use bevy_ptr::{ThinSlicePtr, UnsafeCellDeref as _};
+use bevy_ptr::UnsafeCellDeref as _;
 use bevy_utils::prelude::DebugName;
-use std::{cell::UnsafeCell, iter, marker::PhantomData, panic::Location};
-
-pub struct DefMut<T, const N: usize = 0>(PhantomData<T>);
-
-/// The [`WorldQuery::Fetch`] type for `&mut T`.
-pub struct DefWriteFetch<'w, T: DefComponent> {
-    components: StorageSwitch<
-        T,
-        // T::STORAGE_TYPE = StorageType::Table
-        Option<(
-            ThinSlicePtr<'w, UnsafeCell<T>>,
-            ThinSlicePtr<'w, UnsafeCell<Tick>>,
-            ThinSlicePtr<'w, UnsafeCell<Tick>>,
-            MaybeLocation<ThinSlicePtr<'w, UnsafeCell<&'static Location<'static>>>>,
-        )>,
-        // T::STORAGE_TYPE = StorageType::SparseSet
-        // Can be `None` when the component has never been inserted
-        Option<&'w ComponentSparseSet>,
-    >,
-    last_run: Tick,
-    this_run: Tick,
-}
-
-impl<T: DefComponent> Clone for DefWriteFetch<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: DefComponent> Copy for DefWriteFetch<'_, T> {}
+use std::iter;
 
 // SAFETY:
 // `fetch` accesses a single component mutably.
 // This is sound because `update_component_access` adds write access for that component and panic when appropriate.
 // `update_component_access` adds a `With` filter for a component.
 // This is sound because `matches_component_set` returns whether the set contains that component.
-unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> WorldQuery for DefMut<T, N> {
+unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> WorldQuery for Def<&mut T, N> {
     type Fetch<'w> = DefWriteFetch<'w, T>;
     type State = ComponentId;
 
@@ -152,10 +126,12 @@ unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> WorldQuery fo
 }
 
 // SAFETY: access of `&T` is a subset of `&mut T`
-unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> QueryData for DefMut<T, N> {
+unsafe impl<'a, T: DefComponent<Mutability = Mutable>, const N: usize> QueryData
+    for Def<&'a mut T, N>
+{
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
-    type ReadOnly = Def<T>;
+    type ReadOnly = Def<&'a T>;
     type Item<'w, 's> = Mut<'w, T>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
@@ -226,23 +202,28 @@ unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> QueryData for
 }
 
 // SAFETY: access is only on the current entity
-unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> IterQueryData for DefMut<T, N> {}
-
-// SAFETY: access is only on the current entity
-unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> SingleEntityQueryData
-    for DefMut<T, N>
+unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> IterQueryData
+    for Def<&mut T, N>
 {
 }
 
-impl<T: DefComponent<Mutability = Mutable>, const N: usize> ReleaseStateQueryData for DefMut<T, N> {
+// SAFETY: access is only on the current entity
+unsafe impl<T: DefComponent<Mutability = Mutable>, const N: usize> SingleEntityQueryData
+    for Def<&mut T, N>
+{
+}
+
+impl<T: DefComponent<Mutability = Mutable>, const N: usize> ReleaseStateQueryData
+    for Def<&mut T, N>
+{
     fn release_state<'w>(item: Self::Item<'w, '_>) -> Self::Item<'w, 'static> {
         item
     }
 }
 
-impl<T: DefComponent<Mutability = Mutable>, const N: usize> ArchetypeQueryData for DefMut<T, N> {}
+impl<T: DefComponent<Mutability = Mutable>, const N: usize> ArchetypeQueryData for Def<&mut T, N> {}
 
-impl<T: DefComponent<Mutability = Mutable>, const N: usize> ContiguousQueryData for DefMut<T, N> {
+impl<T: DefComponent<Mutability = Mutable>, const N: usize> ContiguousQueryData for Def<&mut T, N> {
     type Contiguous<'w, 's> = ContiguousMut<'w, T>;
 
     unsafe fn fetch_contiguous<'w, 's>(

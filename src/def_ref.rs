@@ -1,7 +1,10 @@
-use super::{DefComponent, DefineRegister, StorageSwitch};
+use super::{
+    Def, DefComponent, DefineRegister,
+    fetch::{DefRefFetch, StorageSwitch},
+};
 use bevy_ecs::{
     archetype::Archetype,
-    change_detection::{ContiguousRef, MaybeLocation, Tick},
+    change_detection::{ContiguousRef, Tick},
     component::{ComponentId, Components, StorageType},
     entity::Entity,
     query::{
@@ -9,48 +12,19 @@ use bevy_ecs::{
         EcsAccessType, FilteredAccess, IterQueryData, QueryData, ReadOnlyQueryData,
         ReleaseStateQueryData, SingleEntityQueryData, WorldQuery,
     },
-    storage::{ComponentSparseSet, Table, TableRow},
+    storage::{Table, TableRow},
     world::{Ref, World, unsafe_world_cell::UnsafeWorldCell},
 };
-use bevy_ptr::{ThinSlicePtr, UnsafeCellDeref as _};
+use bevy_ptr::UnsafeCellDeref as _;
 use bevy_utils::prelude::DebugName;
-use std::{cell::UnsafeCell, iter, marker::PhantomData, panic::Location};
-
-pub struct DefRef<T, const N: usize = 0>(PhantomData<T>);
-
-#[doc(hidden)]
-pub struct DefRefFetch<'w, T: DefComponent> {
-    components: StorageSwitch<
-        T,
-        // T::STORAGE_TYPE = StorageType::Table
-        Option<(
-            ThinSlicePtr<'w, UnsafeCell<T>>,
-            ThinSlicePtr<'w, UnsafeCell<Tick>>,
-            ThinSlicePtr<'w, UnsafeCell<Tick>>,
-            MaybeLocation<ThinSlicePtr<'w, UnsafeCell<&'static Location<'static>>>>,
-        )>,
-        // T::STORAGE_TYPE = StorageType::SparseSet
-        // Can be `None` when the component has never been inserted
-        Option<&'w ComponentSparseSet>,
-    >,
-    last_run: Tick,
-    this_run: Tick,
-}
-
-impl<T: DefComponent> Clone for DefRefFetch<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: DefComponent> Copy for DefRefFetch<'_, T> {}
+use std::iter;
 
 // SAFETY:
 // `fetch` accesses a single component in a readonly way.
 // This is sound because `update_component_access` adds read access for that component and panic when appropriate.
 // `update_component_access` adds a `With` filter for a component.
 // This is sound because `matches_component_set` returns whether the set contains that component.
-unsafe impl<T: DefComponent, const N: usize> WorldQuery for DefRef<T, N> {
+unsafe impl<T: DefComponent, const N: usize> WorldQuery for Def<Ref<'_, T>, N> {
     type Fetch<'w> = DefRefFetch<'w, T>;
     type State = ComponentId;
 
@@ -152,7 +126,7 @@ unsafe impl<T: DefComponent, const N: usize> WorldQuery for DefRef<T, N> {
 }
 
 // SAFETY: `Self` is the same as `Self::ReadOnly`
-unsafe impl<T: DefComponent, const N: usize> QueryData for DefRef<T, N> {
+unsafe impl<T: DefComponent, const N: usize> QueryData for Def<Ref<'_, T>, N> {
     const IS_READ_ONLY: bool = true;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = Self;
@@ -226,23 +200,23 @@ unsafe impl<T: DefComponent, const N: usize> QueryData for DefRef<T, N> {
 }
 
 // SAFETY: access is read only and only on the current entity
-unsafe impl<T: DefComponent, const N: usize> IterQueryData for DefRef<T, N> {}
+unsafe impl<T: DefComponent, const N: usize> IterQueryData for Def<Ref<'_, T>, N> {}
 
 // SAFETY: access is read only
-unsafe impl<T: DefComponent, const N: usize> ReadOnlyQueryData for DefRef<T, N> {}
+unsafe impl<T: DefComponent, const N: usize> ReadOnlyQueryData for Def<Ref<'_, T>, N> {}
 
 // SAFETY: access is only on the current entity
-unsafe impl<T: DefComponent, const N: usize> SingleEntityQueryData for DefRef<T, N> {}
+unsafe impl<T: DefComponent, const N: usize> SingleEntityQueryData for Def<Ref<'_, T>, N> {}
 
-impl<T: DefComponent, const N: usize> ReleaseStateQueryData for DefRef<T, N> {
+impl<T: DefComponent, const N: usize> ReleaseStateQueryData for Def<Ref<'_, T>, N> {
     fn release_state<'w>(item: Self::Item<'w, '_>) -> Self::Item<'w, 'static> {
         item
     }
 }
 
-impl<T: DefComponent, const N: usize> ArchetypeQueryData for DefRef<T, N> {}
+impl<T: DefComponent, const N: usize> ArchetypeQueryData for Def<Ref<'_, T>, N> {}
 
-impl<T: DefComponent, const N: usize> ContiguousQueryData for DefRef<T, N> {
+impl<T: DefComponent, const N: usize> ContiguousQueryData for Def<Ref<'_, T>, N> {
     type Contiguous<'w, 's> = ContiguousRef<'w, T>;
 
     unsafe fn fetch_contiguous<'w, 's>(

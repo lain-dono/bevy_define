@@ -11,22 +11,20 @@ use bevy_ecs::{
 };
 use bevy_ptr::OwningPtr;
 use std::borrow::Cow;
-use std::marker::PhantomData;
 
 mod def;
-mod def_has;
 mod def_mut;
 mod def_ref;
+mod fetch;
+mod has;
 mod id_for;
 mod key;
 mod reflect;
 mod register;
 
 pub use self::{
-    def::{Def, DefReadFetch},
-    def_has::HasDef,
-    def_mut::{DefMut, DefWriteFetch},
-    def_ref::{DefRef, DefRefFetch},
+    def::Def,
+    has::HasDef,
     id_for::DefComponentIdFor,
     key::{DefKey, Key, KeyDisplay},
     reflect::ReflectDef,
@@ -70,69 +68,6 @@ pub unsafe trait DefComponent: Send + Sync + 'static {
         ComponentCloneBehavior::Default
     }
 }
-
-/// A compile-time checked union of two different types that differs based on the
-/// [`StorageType`] of a given component.
-#[expect(clippy::default_union_representation)]
-pub(crate) union StorageSwitch<C: DefComponent, T: Copy, S: Copy> {
-    /// The table variant. Requires the component to be a table component.
-    table: T,
-    /// The sparse set variant. Requires the component to be a sparse set component.
-    sparse_set: S,
-    marker: PhantomData<C>,
-}
-
-impl<C: DefComponent, T: Copy, S: Copy> StorageSwitch<C, T, S> {
-    /// Creates a new [`StorageSwitch`] using the given closures to initialize
-    /// the variant corresponding to the component's [`StorageType`].
-    pub fn new(table: impl FnOnce() -> T, sparse_set: impl FnOnce() -> S) -> Self {
-        match C::STORAGE_TYPE {
-            StorageType::Table => Self { table: table() },
-            StorageType::SparseSet => Self {
-                sparse_set: sparse_set(),
-            },
-        }
-    }
-
-    /// Creates a new [`StorageSwitch`] using a table variant.
-    ///
-    /// # Panics
-    ///
-    /// This will panic on debug builds if `C` is not a table component.
-    ///
-    /// # Safety
-    ///
-    /// `C` must be a table component.
-    #[inline]
-    pub unsafe fn set_table(&mut self, table: T) {
-        match C::STORAGE_TYPE {
-            StorageType::Table => self.table = table,
-            #[cfg(debug_assertions)]
-            StorageType::SparseSet => unreachable!(),
-            #[cfg(not(debug_assertions))]
-            StorageType::SparseSet => core::hint::unreachable_unchecked(),
-        }
-    }
-
-    /// Fetches the internal value from the variant that corresponds to the
-    /// component's [`StorageType`].
-    pub fn extract<R>(&self, table: impl FnOnce(T) -> R, sparse_set: impl FnOnce(S) -> R) -> R {
-        match C::STORAGE_TYPE {
-            // SAFETY: C::STORAGE_TYPE == StorageType::Table
-            StorageType::Table => table(unsafe { self.table }),
-            // SAFETY: C::STORAGE_TYPE == StorageType::SparseSet
-            StorageType::SparseSet => sparse_set(unsafe { self.sparse_set }),
-        }
-    }
-}
-
-impl<C: DefComponent, T: Copy, S: Copy> Clone for StorageSwitch<C, T, S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<C: DefComponent, T: Copy, S: Copy> Copy for StorageSwitch<C, T, S> {}
 
 pub trait EntityDef {
     fn insert_def<T: DefComponent>(&mut self, key: Key, val: T) -> &mut Self;

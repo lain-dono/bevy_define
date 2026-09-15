@@ -52,7 +52,7 @@ fn init() -> ([DefKey; 2], Entity, World) {
 #[derive(Resource, Default)]
 struct MustBeCalled(bool);
 
-fn my_system(single: Single<'_, '_, (Def<A, 0>, Def<B, 1>)>, mut res: ResMut<'_, MustBeCalled>) {
+fn my_system(single: Single<'_, '_, (Def<&A, 0>, Def<&B, 1>)>, mut res: ResMut<'_, MustBeCalled>) {
     let item = single.into_inner();
     assert_eq!(item, (&A(42), &B(43)), "must be equal");
     res.0 = true;
@@ -64,13 +64,13 @@ fn query() {
 
     {
         world.insert_resource(health.clone());
-        let mut query = QueryBuilder::<(Def<A>, Def<B>)>::new(&mut world).build();
+        let mut query = QueryBuilder::<(Def<&A>, Def<&B>)>::new(&mut world).build();
         let item = query.single(&world).unwrap();
         assert_eq!(item, (&A(42), &B(34)), "must be equal");
     }
     {
         world.insert_resource(stamina.clone());
-        let mut query = QueryBuilder::<(Def<A>, Def<B>)>::new(&mut world).build();
+        let mut query = QueryBuilder::<(Def<&A>, Def<&B>)>::new(&mut world).build();
         let item = query.single(&world).unwrap();
         assert_eq!(item, (&A(24), &B(43)), "must be equal");
     }
@@ -78,7 +78,7 @@ fn query() {
     {
         world.insert_resource(health.arg::<0>());
         world.insert_resource(stamina.arg::<1>());
-        let mut query = QueryBuilder::<(Def<A, 0>, Def<B, 1>)>::new(&mut world).build();
+        let mut query = QueryBuilder::<(Def<&A, 0>, Def<&B, 1>)>::new(&mut world).build();
         let item = query.single(&world).unwrap();
         assert_eq!(item, (&A(42), &B(43)), "must be equal");
     }

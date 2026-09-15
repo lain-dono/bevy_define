@@ -1,4 +1,7 @@
-use super::{DefComponent, DefineRegister, StorageSwitch};
+use super::{
+    DefComponent, DefineRegister,
+    fetch::{DefReadFetch, StorageSwitch},
+};
 use bevy_ecs::{
     archetype::Archetype,
     change_detection::Tick,
@@ -9,40 +12,21 @@ use bevy_ecs::{
         EcsAccessType, FilteredAccess, IterQueryData, QueryData, ReadOnlyQueryData,
         ReleaseStateQueryData, SingleEntityQueryData, WorldQuery,
     },
-    storage::{ComponentSparseSet, Table, TableRow},
+    storage::{Table, TableRow},
     world::{World, unsafe_world_cell::UnsafeWorldCell},
 };
-use bevy_ptr::{ThinSlicePtr, UnsafeCellDeref as _};
+use bevy_ptr::UnsafeCellDeref as _;
 use bevy_utils::prelude::DebugName;
-use std::{cell::UnsafeCell, iter, marker::PhantomData};
+use std::{iter, marker::PhantomData};
 
-pub struct Def<T, const N: usize = 0>(PhantomData<T>);
-
-/// The [`WorldQuery::Fetch`] type for `& T`.
-pub struct DefReadFetch<'w, T: DefComponent> {
-    components: StorageSwitch<
-        T,
-        // T::STORAGE_TYPE = StorageType::Table
-        Option<ThinSlicePtr<'w, UnsafeCell<T>>>,
-        // T::STORAGE_TYPE = StorageType::SparseSet
-        Option<&'w ComponentSparseSet>,
-    >,
-}
-
-impl<T: DefComponent> Clone for DefReadFetch<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: DefComponent> Copy for DefReadFetch<'_, T> {}
+pub struct Def<T: ?Sized, const N: usize = 0>(PhantomData<T>);
 
 // SAFETY:
 // `fetch` accesses a single component in a readonly way.
 // This is sound because `update_component_access` adds read access for that component and panic when appropriate.
 // `update_component_access` adds a `With` filter for a component.
 // This is sound because `matches_component_set` returns whether the set contains that component.
-unsafe impl<T: DefComponent, const N: usize> WorldQuery for Def<T, N> {
+unsafe impl<T: DefComponent, const N: usize> WorldQuery for Def<&T, N> {
     type Fetch<'w> = DefReadFetch<'w, T>;
     type State = ComponentId;
 
@@ -133,7 +117,7 @@ unsafe impl<T: DefComponent, const N: usize> WorldQuery for Def<T, N> {
 }
 
 // SAFETY: `Self` is the same as `Self::ReadOnly`
-unsafe impl<T: DefComponent, const N: usize> QueryData for Def<T, N> {
+unsafe impl<T: DefComponent, const N: usize> QueryData for Def<&T, N> {
     const IS_READ_ONLY: bool = true;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = Self;
@@ -178,7 +162,7 @@ unsafe impl<T: DefComponent, const N: usize> QueryData for Def<T, N> {
     }
 }
 
-impl<T: DefComponent, const N: usize> ContiguousQueryData for Def<T, N> {
+impl<T: DefComponent, const N: usize> ContiguousQueryData for Def<&T, N> {
     type Contiguous<'w, 's> = &'w [T];
 
     unsafe fn fetch_contiguous<'w, 's>(
@@ -207,18 +191,18 @@ impl<T: DefComponent, const N: usize> ContiguousQueryData for Def<T, N> {
 }
 
 // SAFETY: access is read only and only on the current entity
-unsafe impl<T: DefComponent, const N: usize> IterQueryData for Def<T, N> {}
+unsafe impl<T: DefComponent, const N: usize> IterQueryData for Def<&T, N> {}
 
 // SAFETY: access is read only
-unsafe impl<T: DefComponent, const N: usize> ReadOnlyQueryData for Def<T, N> {}
+unsafe impl<T: DefComponent, const N: usize> ReadOnlyQueryData for Def<&T, N> {}
 
 // SAFETY: access is only on the current entity
-unsafe impl<T: DefComponent, const N: usize> SingleEntityQueryData for Def<T, N> {}
+unsafe impl<T: DefComponent, const N: usize> SingleEntityQueryData for Def<&T, N> {}
 
-impl<T: DefComponent, const N: usize> ReleaseStateQueryData for Def<T, N> {
+impl<T: DefComponent, const N: usize> ReleaseStateQueryData for Def<&T, N> {
     fn release_state<'w>(item: Self::Item<'w, '_>) -> Self::Item<'w, 'static> {
         item
     }
 }
 
-impl<T: DefComponent, const N: usize> ArchetypeQueryData for Def<T, N> {}
+impl<T: DefComponent, const N: usize> ArchetypeQueryData for Def<&T, N> {}
