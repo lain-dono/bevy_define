@@ -15,6 +15,7 @@ use std::any::TypeId;
 pub struct DefineRegister {
     slots: HashMap<(Key, TypeId), ComponentId>,
     index: HashMap<ComponentId, (Key, TypeId)>,
+    types: HashMap<TypeId, Vec<ComponentId>>,
 }
 
 impl DefineRegister {
@@ -24,6 +25,10 @@ impl DefineRegister {
 
     pub fn keys(&self) -> Keys<'_, (Key, TypeId), ComponentId> {
         self.slots.keys()
+    }
+
+    pub fn types<T: DefComponent>(&self) -> &Vec<ComponentId> {
+        self.types.get(&TypeId::of::<T>()).unwrap()
     }
 
     pub fn component<T>(&mut self, world: &mut World, key: Key) -> (ComponentId, TypeId)
@@ -66,6 +71,9 @@ impl DefineRegister {
                 });
 
                 self.index.insert(id, (key.clone(), type_id));
+
+                let ty = self.types.entry(type_id).or_default();
+                ty.push(id);
 
                 id
             });

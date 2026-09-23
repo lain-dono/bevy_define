@@ -12,9 +12,8 @@ use bevy_ecs::{
 use bevy_ptr::OwningPtr;
 use std::borrow::Cow;
 
+mod any_def;
 mod def;
-mod def_mut;
-mod def_ref;
 mod fetch;
 mod has;
 mod id_for;
@@ -23,7 +22,9 @@ mod reflect;
 mod register;
 
 pub use self::{
+    any_def::{AnyDef, AnyRead, AnyWrite, ReadIter, WriteIter},
     def::Def,
+    fetch::{AnyFetch, AnyQueryState, DefReadFetch, DefTickFetch},
     has::HasDef,
     id_for::DefComponentIdFor,
     key::{DefKey, Key, KeyDisplay},
