@@ -1,9 +1,8 @@
 #![expect(clippy::undocumented_unsafe_blocks)]
 
-use std::str::FromStr;
-
-use bevy_define::{Def, DefComponent, DefKey, DefineRegister, EntityDef as _, clone_def};
+use bevy_define::{AnyDef, Def, DefComponent, DefKey, DefineRegister, EntityDef as _, clone_def};
 use bevy_ecs::{component::Mutable, prelude::*, schedule::ScheduleLabel};
+use std::str::FromStr;
 
 // Declare a new schedule label.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -81,6 +80,27 @@ fn query() {
         let mut query = QueryBuilder::<(Def<&A, 0>, Def<&B, 1>)>::new(&mut world).build();
         let item = query.single(&world).unwrap();
         assert_eq!(item, (&A(42), &B(43)), "must be equal");
+    }
+}
+
+#[test]
+fn any_query() {
+    let (_, _entity, mut world) = init();
+
+    {
+        let mut query = QueryBuilder::<AnyDef<&A>>::new(&mut world).build();
+        let item = query.single(&world).unwrap();
+        let variations = item.iter().collect::<Vec<Ref<_>>>();
+        assert_eq!(&*variations[0], &A(42));
+        assert_eq!(&*variations[1], &A(24));
+    }
+
+    {
+        let mut query = QueryBuilder::<AnyDef<&B>>::new(&mut world).build();
+        let item = query.single(&world).unwrap();
+        let variations = item.iter().collect::<Vec<Ref<_>>>();
+        assert_eq!(&*variations[0], &B(34));
+        assert_eq!(&*variations[1], &B(43));
     }
 }
 
