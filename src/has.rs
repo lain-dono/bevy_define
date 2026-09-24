@@ -171,7 +171,7 @@ unsafe impl<T: DefComponent, const N: usize> QueryData for HasDef<T, N> {
         _state: &'s Self::State,
         fetch: &mut Self::Fetch<'w>,
         _entity: Entity,
-        _table_row: TableRow,
+        _row: TableRow,
     ) -> Option<Self::Item<'w, 's>> {
         Some(*fetch)
     }

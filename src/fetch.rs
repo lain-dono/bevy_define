@@ -1,5 +1,5 @@
 use crate::{
-    DefComponent, DefineRegister,
+    DefComponent, DefineRegister, Key,
     any_def::{AnyRead, AnyWrite},
 };
 use bevy_ecs::{
@@ -67,13 +67,11 @@ impl<'w, T: DefComponent> DefTickFetch<'w, T> {
         Self {
             components: StorageSwitch::new(
                 || None,
-                || {
-                    // SAFETY: The underlying type associated with `component_id` is `T`,
-                    // which we are allowed to access since we registered it in `update_component_access`.
-                    // Note that we do not actually access any components in this function, we just get a shared
-                    // reference to the sparse set, which is used to access the components in `Self::fetch`.
-                    unsafe { world.storages().sparse_sets.get(component_id) }
-                },
+                // SAFETY: The underlying type associated with `component_id` is `T`,
+                // which we are allowed to access since we registered it in `update_component_access`.
+                // Note that we do not actually access any components in this function, we just get a shared
+                // reference to the sparse set, which is used to access the components in `Self::fetch`.
+                || unsafe { world.storages().sparse_sets.get(component_id) },
             ),
             last_run,
             this_run,
@@ -83,50 +81,41 @@ impl<'w, T: DefComponent> DefTickFetch<'w, T> {
     /// SAFETY: set_table must be called when T::STORAGE_TYPE = StorageType::Table
     pub(crate) unsafe fn set_table(&mut self, component_id: ComponentId, table: &'w Table) {
         unsafe {
+            let len = table.entity_count() as usize;
             let column = table.get_column(component_id).debug_checked_unwrap();
-            let table_data = Some((
-                column.get_data_slice(table.entity_count() as usize).into(),
-                column
-                    .get_added_ticks_slice(table.entity_count() as usize)
-                    .into(),
-                column
-                    .get_changed_ticks_slice(table.entity_count() as usize)
-                    .into(),
-                column
-                    .get_changed_by_slice(table.entity_count() as usize)
-                    .map(Into::into),
-            ));
-            self.components.set_table(table_data);
+            self.components.set_table(Some((
+                column.get_data_slice(len).into(),
+                column.get_added_ticks_slice(len).into(),
+                column.get_changed_ticks_slice(len).into(),
+                column.get_changed_by_slice(len).map(Into::into),
+            )));
         }
     }
 
     pub(crate) fn fetch_ref(&mut self, entity: Entity, row: TableRow) -> Ref<'w, T> {
         let (value, added, changed, caller) = unsafe { self.fetch(entity, row) };
 
-        Ref::new(
-            unsafe { value.deref() },
-            unsafe { added.deref() },
-            unsafe { changed.deref() },
-            self.last_run,
-            self.this_run,
-            unsafe { caller.map(|caller| caller.deref()) },
-        )
+        let value = unsafe { value.deref() };
+        let [added, changed] = [added, changed].map(|cell| unsafe { cell.deref() });
+        let (last_run, this_run) = (self.last_run, self.this_run);
+
+        Ref::new(value, added, changed, last_run, this_run, unsafe {
+            caller.map(|caller| caller.deref())
+        })
     }
 
     pub(crate) fn fetch_mut(&mut self, entity: Entity, row: TableRow) -> Mut<'w, T> {
         let (value, added, changed, caller) = unsafe { self.fetch(entity, row) };
 
-        Mut::new(
-            unsafe { value.assert_unique().deref_mut() },
-            // SAFETY: Caller ensures there is no mutable access to the cell.
-            unsafe { added.deref_mut() },
-            // SAFETY: Caller ensures there is no mutable access to the cell.
-            unsafe { changed.deref_mut() },
-            self.last_run,
-            self.this_run,
-            // SAFETY: Caller ensures there is no mutable access to the cell.
-            unsafe { caller.map(|caller| caller.deref_mut()) },
-        )
+        let value = unsafe { value.assert_unique().deref_mut() };
+        // SAFETY: Caller ensures there is no mutable access to the cell.
+        let [added, changed] = [added, changed].map(|cell| unsafe { cell.deref_mut() });
+        let (last_run, this_run) = (self.last_run, self.this_run);
+
+        // SAFETY: Caller ensures there is no mutable access to the cell.
+        Mut::new(value, added, changed, last_run, this_run, unsafe {
+            caller.map(|caller| caller.deref_mut())
+        })
     }
 
     pub(crate) unsafe fn fetch(
@@ -142,19 +131,16 @@ impl<'w, T: DefComponent> DefTickFetch<'w, T> {
         let (value, added, changed, caller) = self.components.extract(
             |table| {
                 // SAFETY: set_table was previously called
-                let (table_components, added_ticks, changed_ticks, callers) =
-                    unsafe { table.debug_checked_unwrap() };
+                let (components, added, changed, callers) = unsafe { table.debug_checked_unwrap() };
 
-                // SAFETY: The caller ensures `table_row` is in range.
-                let component = unsafe { table_components.get_unchecked(row.index()) };
-                // SAFETY: The caller ensures `table_row` is in range.
-                let added = unsafe { added_ticks.get_unchecked(row.index()) };
-                // SAFETY: The caller ensures `table_row` is in range.
-                let changed = unsafe { changed_ticks.get_unchecked(row.index()) };
-                // SAFETY: The caller ensures `table_row` is in range.
-                let caller = callers.map(|callers| unsafe { callers.get_unchecked(row.index()) });
-
-                unsafe { (Ptr::from(&*(component.get())), added, changed, caller) }
+                // SAFETY: The caller ensures `row` is in range.
+                unsafe {
+                    let component = components.get_unchecked(row.index());
+                    let added = added.get_unchecked(row.index());
+                    let changed = changed.get_unchecked(row.index());
+                    let caller = callers.map(|callers| callers.get_unchecked(row.index()));
+                    (Ptr::from(&*(component.get())), added, changed, caller)
+                }
             },
             |sparse_set| {
                 // SAFETY: The caller ensures `entity` is in range and has the component.
@@ -174,7 +160,7 @@ impl<'w, T: DefComponent> DefTickFetch<'w, T> {
 }
 
 pub struct AnyQueryState<T: DefComponent> {
-    components: Box<[ComponentId]>,
+    components: Box<[(Key, ComponentId)]>,
     marker: PhantomData<T>,
 }
 
@@ -192,7 +178,7 @@ impl<T: DefComponent> AnyQueryState<T> {
 
     #[inline]
     pub(crate) fn matches(&self, f: &impl Fn(ComponentId) -> bool) -> bool {
-        self.components.iter().copied().any(f)
+        self.components.iter().map(|&(_, id)| id).any(f)
     }
 
     #[inline]
@@ -200,7 +186,7 @@ impl<T: DefComponent> AnyQueryState<T> {
         let mut new_access = access.clone();
         let mut components = self.components.iter();
 
-        if let Some(&component) = components.next() {
+        if let Some(&(_, component)) = components.next() {
             assert!(
                 !access.access().has_write(component),
                 "{} conflicts with a previous access in this query",
@@ -216,7 +202,7 @@ impl<T: DefComponent> AnyQueryState<T> {
             new_access.extend_access(&intermediate);
         }
 
-        for &component in components {
+        for &(_, component) in components {
             assert!(
                 !access.access().has_write(component),
                 "{} conflicts with a previous access in this query",

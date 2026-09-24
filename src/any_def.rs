@@ -1,5 +1,5 @@
 use super::{
-    DefComponent, DefineRegister,
+    DefComponent, DefineRegister, Key,
     fetch::{AnyFetch, AnyQueryState, StorageSwitch},
 };
 use bevy_ecs::{
@@ -38,7 +38,7 @@ pub struct AnyRead<'a, T: DefComponent> {
 }
 
 impl<'w, T: DefComponent> IntoIterator for AnyRead<'w, T> {
-    type Item = Ref<'w, T>;
+    type Item = (&'w [u8], Ref<'w, T>);
     type IntoIter = ReadIter<'w, T>;
 
     #[inline]
@@ -53,7 +53,7 @@ impl<'w, T: DefComponent> IntoIterator for AnyRead<'w, T> {
 }
 
 impl<'w, T: DefComponent> IntoIterator for &AnyRead<'w, T> {
-    type Item = Ref<'w, T>;
+    type Item = (&'w [u8], Ref<'w, T>);
     type IntoIter = ReadIter<'w, T>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -73,39 +73,50 @@ impl<'w, T: DefComponent> AnyRead<'w, T> {
 }
 
 pub struct ReadIter<'a, T: DefComponent> {
-    pub(crate) components: core::slice::Iter<'a, ComponentId>,
+    pub(crate) components: core::slice::Iter<'a, (Key, ComponentId)>,
     pub(crate) data: StorageSwitch<T, (TableRow, &'a Table), (Entity, &'a SparseSets)>,
     pub(crate) last_run: Tick,
     pub(crate) this_run: Tick,
 }
 
 impl<'a, T: DefComponent> ReadIter<'a, T> {
-    pub fn added(self) -> Filter<Self, fn(&Ref<'a, T>) -> bool> {
-        self.filter(DetectChanges::is_added)
+    pub fn intersect<I, V>(self, b: I) -> IntersectionIter<'a, Self, I, Ref<'a, T>, V>
+    where
+        I: Iterator<Item = (&'a [u8], V)>,
+    {
+        IntersectionIter(self.peekable(), b.peekable())
     }
 
-    pub fn changed(self) -> Filter<Self, fn(&Ref<'a, T>) -> bool> {
-        self.filter(DetectChanges::is_changed)
+    pub fn added(self) -> Filter<Self, fn(&(&'a [u8], Ref<'a, T>)) -> bool> {
+        self.filter(|(_, value)| value.is_added())
+    }
+
+    pub fn changed(self) -> Filter<Self, fn(&(&'a [u8], Ref<'a, T>)) -> bool> {
+        self.filter(|(_, value)| value.is_changed())
     }
 }
 
 impl<'a, T: DefComponent> Iterator for ReadIter<'a, T> {
-    type Item = Ref<'a, T>;
+    type Item = (&'a [u8], Ref<'a, T>);
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.components.len()))
+    }
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (value, added, changed, location) = match T::STORAGE_TYPE {
+        let (key, value, added, changed, location) = match T::STORAGE_TYPE {
             StorageType::Table => {
                 // SAFETY: C::STORAGE_TYPE == StorageType::Table
                 let (row, table) = unsafe { self.data.table };
 
                 // Iterate the remaining table components that are registered,
                 // until we find one that exists in the table.
-                // SAFETY: we know that the `table_row` is a valid index.
-                let (value, component_id, location) =
-                    self.components.find_map(|&component| unsafe {
+                // SAFETY: we know that the `row` is a valid index.
+                let (key, value, component_id, location) =
+                    self.components.find_map(|&(ref key, component)| unsafe {
                         let ptr = table.get_component(component, row)?;
                         let location = table.get_changed_by(component, row);
-                        Some((ptr.deref::<T>(), component, location))
+                        Some((key.as_ref(), ptr.deref::<T>(), component, location))
                     })?;
 
                 let [added_tick, changed_tick] = [
@@ -113,31 +124,33 @@ impl<'a, T: DefComponent> Iterator for ReadIter<'a, T> {
                     table.get_changed_tick(component_id, row)?,
                 ];
 
-                (value, added_tick, changed_tick, location.transpose()?)
+                (key, value, added_tick, changed_tick, location.transpose()?)
             }
             StorageType::SparseSet => {
                 // SAFETY: C::STORAGE_TYPE == StorageType::SparseSet
                 let (entity, sets) = unsafe { self.data.sparse_set };
 
-                let (value, ticks, location) = self.components.find_map(|&component| unsafe {
-                    let set = sets.get(component)?;
-                    let (ptr, ticks) = set.get_with_ticks(entity)?;
-                    Some((ptr.deref::<T>(), ticks, ticks.changed_by))
-                })?;
-                (value, ticks.added, ticks.changed, location)
+                let (key, value, ticks, location) =
+                    self.components.find_map(|&(ref key, component)| unsafe {
+                        let set = sets.get(component)?;
+                        let (ptr, ticks) = set.get_with_ticks(entity)?;
+                        Some((key.as_ref(), ptr.deref::<T>(), ticks, ticks.changed_by))
+                    })?;
+                (key, value, ticks.added, ticks.changed, location)
             }
         };
 
         // SAFETY:
         // Read access has been registered, so we can dereference it immutably.
-        Some(Ref::new(
+        let value = Ref::new(
             value,
             unsafe { added.deref() },
             unsafe { changed.deref() },
             self.last_run,
             self.this_run,
             unsafe { location.map(|loc| loc.deref()) },
-        ))
+        );
+        Some((key, value))
     }
 }
 
@@ -264,7 +277,7 @@ impl<T: DefComponent> AnyWrite<'_, T> {
 }
 
 impl<'w, T: DefComponent> IntoIterator for AnyWrite<'w, T> {
-    type Item = Mut<'w, T>;
+    type Item = (&'w [u8], Mut<'w, T>);
     type IntoIter = WriteIter<'w, T>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -278,7 +291,7 @@ impl<'w, T: DefComponent> IntoIterator for AnyWrite<'w, T> {
 }
 
 impl<'a, T: DefComponent> IntoIterator for &'a AnyWrite<'_, T> {
-    type Item = Ref<'a, T>;
+    type Item = (&'a [u8], Ref<'a, T>);
     type IntoIter = ReadIter<'a, T>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -292,7 +305,7 @@ impl<'a, T: DefComponent> IntoIterator for &'a AnyWrite<'_, T> {
 }
 
 impl<'a, T: DefComponent> IntoIterator for &'a mut AnyWrite<'_, T> {
-    type Item = Mut<'a, T>;
+    type Item = (&'a [u8], Mut<'a, T>);
     type IntoIter = WriteIter<'a, T>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -307,41 +320,52 @@ impl<'a, T: DefComponent> IntoIterator for &'a mut AnyWrite<'_, T> {
 
 pub struct WriteIter<'a, T: DefComponent> {
     // SAFETY: These two iterators must have equal length.
-    pub(crate) components: core::slice::Iter<'a, ComponentId>,
+    pub(crate) components: core::slice::Iter<'a, (Key, ComponentId)>,
     /// SAFETY: Given the same trait type and same archetype,
-    /// no two instances of this struct may have the same `table_row`.
+    /// no two instances of this struct may have the same `row`.
     pub(crate) data: StorageSwitch<T, (TableRow, &'a Table), (Entity, &'a SparseSets)>,
     pub(crate) last_run: Tick,
     pub(crate) this_run: Tick,
 }
 
 impl<'a, T: DefComponent> WriteIter<'a, T> {
-    pub fn added(self) -> Filter<Self, fn(&Mut<'a, T>) -> bool> {
-        self.filter(DetectChanges::is_added)
+    pub fn intersect<I, V>(self, b: I) -> IntersectionIter<'a, Self, I, Mut<'a, T>, V>
+    where
+        I: Iterator<Item = (&'a [u8], V)>,
+    {
+        IntersectionIter(self.peekable(), b.peekable())
     }
 
-    pub fn changed(self) -> Filter<Self, fn(&Mut<'a, T>) -> bool> {
-        self.filter(DetectChanges::is_changed)
+    pub fn added(self) -> Filter<Self, fn(&(&'a [u8], Mut<'a, T>)) -> bool> {
+        self.filter(|(_, value)| value.is_added())
+    }
+
+    pub fn changed(self) -> Filter<Self, fn(&(&'a [u8], Mut<'a, T>)) -> bool> {
+        self.filter(|(_, value)| value.is_changed())
     }
 }
 
 impl<'a, T: DefComponent> Iterator for WriteIter<'a, T> {
-    type Item = Mut<'a, T>;
+    type Item = (&'a [u8], Mut<'a, T>);
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.components.len()))
+    }
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (value, added, changed, location) = match T::STORAGE_TYPE {
+        let (key, value, added, changed, location) = match T::STORAGE_TYPE {
             StorageType::Table => {
                 // SAFETY: C::STORAGE_TYPE == StorageType::Table
                 let (row, table) = unsafe { self.data.table };
 
                 // Iterate the remaining table components that are registered,
                 // until we find one that exists in the table.
-                // SAFETY: we know that the `table_row` is a valid index.
-                let (value, component_id, location) =
-                    self.components.find_map(|&component| unsafe {
+                // SAFETY: we know that the `row` is a valid index.
+                let (key, value, component_id, location) =
+                    self.components.find_map(|&(ref key, component)| unsafe {
                         let ptr = table.get_component(component, row)?.assert_unique();
                         let location = table.get_changed_by(component, row);
-                        Some((ptr.deref_mut::<T>(), component, location))
+                        Some((key.as_ref(), ptr.deref_mut::<T>(), component, location))
                     })?;
 
                 let [added_tick, changed_tick] = [
@@ -349,30 +373,33 @@ impl<'a, T: DefComponent> Iterator for WriteIter<'a, T> {
                     table.get_changed_tick(component_id, row)?,
                 ];
 
-                (value, added_tick, changed_tick, location.transpose()?)
+                (key, value, added_tick, changed_tick, location.transpose()?)
             }
             StorageType::SparseSet => {
                 // SAFETY: C::STORAGE_TYPE == StorageType::SparseSet
                 let (entity, sets) = unsafe { self.data.sparse_set };
 
-                let (value, ticks, location) = self.components.find_map(|&component| unsafe {
-                    let set = sets.get(component)?;
-                    let (ptr, ticks) = set.get_with_ticks(entity)?;
-                    let ptr = ptr.assert_unique().deref_mut::<T>();
-                    Some((ptr, ticks, ticks.changed_by))
-                })?;
-                (value, ticks.added, ticks.changed, location)
+                let (key, value, ticks, location) =
+                    self.components.find_map(|&(ref key, component)| unsafe {
+                        let set = sets.get(component)?;
+                        let (ptr, ticks) = set.get_with_ticks(entity)?;
+                        let ptr = ptr.assert_unique().deref_mut::<T>();
+                        Some((key.as_ref(), ptr, ticks, ticks.changed_by))
+                    })?;
+                (key, value, ticks.added, ticks.changed, location)
             }
         };
 
-        Some(Mut::new(
+        let value = Mut::new(
             value,
             unsafe { added.deref_mut() },
             unsafe { changed.deref_mut() },
             self.last_run,
             self.this_run,
             unsafe { location.map(|loc| loc.deref_mut()) },
-        ))
+        );
+
+        Some((key, value))
     }
 }
 
@@ -465,5 +492,45 @@ unsafe impl<T: DefComponent<Mutability = Mutable>> WorldQuery for AnyDef<&mut T>
     #[inline]
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
+    }
+}
+
+pub struct IntersectionIter<'a, A, B, AI, BI>(std::iter::Peekable<A>, std::iter::Peekable<B>)
+where
+    A: Iterator<Item = (&'a [u8], AI)>,
+    B: Iterator<Item = (&'a [u8], BI)>;
+
+impl<'a, A, B, AI, BI> Iterator for IntersectionIter<'a, A, B, AI, BI>
+where
+    A: Iterator<Item = (&'a [u8], AI)>,
+    B: Iterator<Item = (&'a [u8], BI)>,
+{
+    type Item = (&'a [u8], AI, BI);
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (a, b) = (self.0.size_hint(), self.1.size_hint());
+        let max = a.1.zip(b.1).map(|(a, b)| usize::max(a, b));
+        (usize::min(a.0, b.0), max)
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let &(a, _) = self.0.peek()?;
+            let &(b, _) = self.1.peek()?;
+
+            match a.cmp(b) {
+                std::cmp::Ordering::Less => {
+                    self.0.next()?;
+                }
+                std::cmp::Ordering::Greater => {
+                    self.1.next()?;
+                }
+                std::cmp::Ordering::Equal => {
+                    let (key, a) = self.0.next().unwrap();
+                    let (_, b) = self.1.next().unwrap();
+                    return Some((key, a, b));
+                }
+            };
+        }
     }
 }

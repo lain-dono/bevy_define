@@ -90,7 +90,7 @@ fn any_query() {
     {
         let mut query = QueryBuilder::<AnyDef<&A>>::new(&mut world).build();
         let item = query.single(&world).unwrap();
-        let variations = item.iter().collect::<Vec<Ref<_>>>();
+        let variations = item.iter().map(|(_, v)| v).collect::<Vec<Ref<_>>>();
         assert_eq!(&*variations[0], &A(42));
         assert_eq!(&*variations[1], &A(24));
     }
@@ -98,7 +98,7 @@ fn any_query() {
     {
         let mut query = QueryBuilder::<AnyDef<&B>>::new(&mut world).build();
         let item = query.single(&world).unwrap();
-        let variations = item.iter().collect::<Vec<Ref<_>>>();
+        let variations = item.iter().map(|(_, v)| v).collect::<Vec<Ref<_>>>();
         assert_eq!(&*variations[0], &B(34));
         assert_eq!(&*variations[1], &B(43));
     }

@@ -44,13 +44,11 @@ unsafe impl<T: DefComponent, const N: usize> WorldQuery for Def<&T, N> {
         DefReadFetch {
             components: StorageSwitch::new(
                 || None,
-                || {
-                    // SAFETY: The underlying type associated with `component_id` is `T`,
-                    // which we are allowed to access since we registered it in `update_component_access`.
-                    // Note that we do not actually access any components in this function, we just get a shared
-                    // reference to the sparse set, which is used to access the components in `Self::fetch`.
-                    unsafe { world.storages().sparse_sets.get(component_id) }
-                },
+                // SAFETY: The underlying type associated with `component_id` is `T`,
+                // which we are allowed to access since we registered it in `update_component_access`.
+                // Note that we do not actually access any components in this function, we just get a shared
+                // reference to the sparse set, which is used to access the components in `Self::fetch`.
+                || unsafe { world.storages().sparse_sets.get(component_id) },
             ),
         }
     }
@@ -131,25 +129,24 @@ unsafe impl<T: DefComponent, const N: usize> QueryData for Def<&T, N> {
         _state: &'s Self::State,
         fetch: &mut Self::Fetch<'w>,
         entity: Entity,
-        table_row: TableRow,
+        row: TableRow,
     ) -> Option<Self::Item<'w, 's>> {
         Some(fetch.components.extract(
-            |table| {
-                // SAFETY: set_table was previously called
-                let table = unsafe { table.debug_checked_unwrap() };
-                // SAFETY: Caller ensures `table_row` is in range.
-                let item = unsafe { table.get_unchecked(table_row.index()) };
-                item.deref()
+            // SAFETY: set_table was previously called
+            // SAFETY: Caller ensures `row` is in range.
+            |table| unsafe {
+                table
+                    .debug_checked_unwrap()
+                    .get_unchecked(row.index())
+                    .deref()
             },
-            |sparse_set| {
-                // SAFETY: Caller ensures `entity` is in range.
-                let item = unsafe {
-                    sparse_set
-                        .debug_checked_unwrap()
-                        .get(entity)
-                        .debug_checked_unwrap()
-                };
-                item.deref()
+            // SAFETY: Caller ensures `entity` is in range.
+            |sparse_set| unsafe {
+                sparse_set
+                    .debug_checked_unwrap()
+                    .get(entity)
+                    .debug_checked_unwrap()
+                    .deref()
             },
         ))
     }
@@ -168,13 +165,15 @@ impl<T: DefComponent, const N: usize> ContiguousQueryData for Def<&T, N> {
         entities: &'w [Entity],
     ) -> Self::Contiguous<'w, 's> {
         fetch.components.extract(
-            |table| {
-                // SAFETY: The caller ensures `set_table` was previously called
-                let table = unsafe { table.debug_checked_unwrap() };
-                // SAFETY:
-                // - `table` is `entities.len()` long
-                // - `UnsafeCell<T>` has the same layout as `T`
-                unsafe { table.cast().as_slice_unchecked(entities.len()) }
+            // SAFETY: The caller ensures `set_table` was previously called
+            // SAFETY:
+            // - `table` is `entities.len()` long
+            // - `UnsafeCell<T>` has the same layout as `T`
+            |table| unsafe {
+                table
+                    .debug_checked_unwrap()
+                    .cast()
+                    .as_slice_unchecked(entities.len())
             },
             |_| {
                 #[cfg(debug_assertions)]
